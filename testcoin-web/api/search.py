@@ -5,12 +5,13 @@ from http.server import BaseHTTPRequestHandler
 import sys
 import os
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'Testcoin'))
+sys.path.append(os.path.dirname(__file__))
 
 try:
     import PlayFab
     from coin import extract_id_from_url, perform_search, login as auth_login, auth_token
-except ImportError:
+except ImportError as e:
+    print(f"Import error: {e}")
     PlayFab = None
 
 # Get API key from environment variable
