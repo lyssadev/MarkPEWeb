@@ -10,8 +10,21 @@ interface SearchResult {
   source?: string;
 }
 
-interface DownloadStatus {
-  [key: string]: 'idle' | 'downloading' | 'completed' | 'error';
+interface DownloadItem {
+  id: string;
+  title: string;
+  status: 'downloading' | 'completed' | 'error';
+  progress: number;
+  totalSize: number;
+  downloadedSize: number;
+  speed: number;
+  startTime: number;
+}
+
+interface Notification {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info';
 }
 
 // API Configuration
@@ -23,7 +36,9 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [noResultsError, setNoResultsError] = useState('');
-  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>({});
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isDownloadPanelOpen, setIsDownloadPanelOpen] = useState(false);
 
   useEffect(() => {
     console.log(`
@@ -103,8 +118,47 @@ Minecraft Marketplace Content Platform
     }
   };
 
+  // Helper functions for downloads and notifications
+  const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
+    const id = Date.now().toString();
+    const notification: Notification = { id, message, type };
+    setNotifications(prev => [...prev, notification]);
+
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatSpeed = (bytesPerSecond: number): string => {
+    return formatBytes(bytesPerSecond) + '/s';
+  };
+
   const handleDownload = async (itemId: string, title: string) => {
-    setDownloadStatus(prev => ({ ...prev, [itemId]: 'downloading' }));
+    // Add notification
+    addNotification(`Starting download: ${title}`, 'info');
+
+    // Create download item
+    const downloadItem: DownloadItem = {
+      id: itemId,
+      title,
+      status: 'downloading',
+      progress: 0,
+      totalSize: 0,
+      downloadedSize: 0,
+      speed: 0,
+      startTime: Date.now()
+    };
+
+    setDownloads(prev => [...prev.filter(d => d.id !== itemId), downloadItem]);
 
     try {
       const apiUrl = `${API_BASE_URL}/api/download`;
@@ -124,6 +178,14 @@ Minecraft Marketplace Content Platform
         throw new Error(`Download failed: ${response.status}`);
       }
 
+      const contentLength = response.headers.get('content-length');
+      const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
+
+      // Update download item with total size
+      setDownloads(prev => prev.map(d =>
+        d.id === itemId ? { ...d, totalSize } : d
+      ));
+
       // Get the filename from response headers or use a default
       const contentDisposition = response.headers.get('content-disposition');
       let filename = `${title.replace(/[^a-z0-9]/gi, '_')}.zip`;
@@ -135,8 +197,43 @@ Minecraft Marketplace Content Platform
         }
       }
 
+      // Read the response with progress tracking
+      const reader = response.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let downloadedSize = 0;
+      const startTime = Date.now();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          chunks.push(value);
+          downloadedSize += value.length;
+
+          const currentTime = Date.now();
+          const elapsedTime = (currentTime - startTime) / 1000; // seconds
+          const speed = elapsedTime > 0 ? downloadedSize / elapsedTime : 0;
+          const progress = totalSize > 0 ? (downloadedSize / totalSize) * 100 : 0;
+
+          // Update download progress - capture values to avoid closure issues
+          const currentDownloadedSize = downloadedSize;
+          const currentProgress = Math.min(progress, 100);
+          const currentSpeed = speed;
+
+          setDownloads(prev => prev.map(d =>
+            d.id === itemId ? {
+              ...d,
+              downloadedSize: currentDownloadedSize,
+              progress: currentProgress,
+              speed: currentSpeed
+            } : d
+          ));
+        }
+      }
+
       // Create blob and download
-      const blob = await response.blob();
+      const blob = new Blob(chunks);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -146,27 +243,116 @@ Minecraft Marketplace Content Platform
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      setDownloadStatus(prev => ({ ...prev, [itemId]: 'completed' }));
+      // Mark as completed
+      setDownloads(prev => prev.map(d =>
+        d.id === itemId ? { ...d, status: 'completed', progress: 100 } : d
+      ));
 
-      // Reset status after 3 seconds
+      addNotification(`Download completed: ${title}`, 'success');
+
+      // Remove from downloads after 10 seconds
       setTimeout(() => {
-        setDownloadStatus(prev => ({ ...prev, [itemId]: 'idle' }));
-      }, 3000);
+        setDownloads(prev => prev.filter(d => d.id !== itemId));
+      }, 10000);
 
     } catch (err) {
       console.error('Download error:', err);
-      setDownloadStatus(prev => ({ ...prev, [itemId]: 'error' }));
 
-      // Reset status after 3 seconds
+      // Mark as error
+      setDownloads(prev => prev.map(d =>
+        d.id === itemId ? { ...d, status: 'error' } : d
+      ));
+
+      addNotification(`Download failed: ${title}`, 'error');
+
+      // Remove from downloads after 5 seconds
       setTimeout(() => {
-        setDownloadStatus(prev => ({ ...prev, [itemId]: 'idle' }));
-      }, 3000);
+        setDownloads(prev => prev.filter(d => d.id !== itemId));
+      }, 5000);
     }
   };
 
   return (
     <div className="App">
+      {/* Notifications */}
+      <div className="notifications-container">
+        {notifications.map((notification) => (
+          <div key={notification.id} className={`notification notification-${notification.type}`}>
+            <div className="notification-content">
+              {notification.message}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Downloads Panel */}
+      <div className={`downloads-panel ${isDownloadPanelOpen ? 'open' : ''}`}>
+        <div className="downloads-header">
+          <h3>Downloads</h3>
+          <button
+            className="close-panel-btn"
+            onClick={() => setIsDownloadPanelOpen(false)}
+          >
+            ✕
+          </button>
+        </div>
+        <div className="downloads-content">
+          {downloads.length === 0 ? (
+            <div className="no-downloads">No active downloads</div>
+          ) : (
+            downloads.map((download) => (
+              <div key={download.id} className={`download-item ${download.status}`}>
+                <div className="download-info">
+                  <div className="download-title">{download.title}</div>
+                  <div className="download-progress">
+                    <div className="progress-bar">
+                      <div
+                        className="progress-fill"
+                        style={{ width: `${download.progress}%` }}
+                      ></div>
+                    </div>
+                    <div className="progress-text">
+                      {download.progress.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="download-stats">
+                    <span className="download-size">
+                      {formatBytes(download.downloadedSize)} / {formatBytes(download.totalSize)}
+                    </span>
+                    {download.status === 'downloading' && download.speed > 0 && (
+                      <span className="download-speed">
+                        {formatSpeed(download.speed)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="download-status">
+                  {download.status === 'downloading' && <div className="spinner-small"></div>}
+                  {download.status === 'completed' && <span className="status-icon">✓</span>}
+                  {download.status === 'error' && <span className="status-icon error">✗</span>}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
       <header className="App-header">
+        {/* Downloads Icon */}
+        <div className="downloads-icon-container">
+          <button
+            className="downloads-icon"
+            onClick={() => setIsDownloadPanelOpen(!isDownloadPanelOpen)}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+            </svg>
+            {downloads.length > 0 && (
+              <span className="download-count">{downloads.length}</span>
+            )}
+          </button>
+        </div>
+
         <div className="title">
           <pre>{`
 ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██████╗ ███████╗
@@ -205,7 +391,11 @@ Minecraft Marketplace Content Platform
             <h3>Search Results ({results.length})</h3>
             <div className="results-list">
               {results.map((result, index) => {
-                const status = downloadStatus[result.Id] || 'idle';
+                const downloadItem = downloads.find(d => d.id === result.Id);
+                const isDownloading = downloadItem?.status === 'downloading';
+                const isCompleted = downloadItem?.status === 'completed';
+                const isError = downloadItem?.status === 'error';
+
                 return (
                   <div key={result.Id} className="result-item">
                     <div className="result-number">{index + 1}</div>
@@ -229,20 +419,20 @@ Minecraft Marketplace Content Platform
                     </div>
                     <div className="result-actions">
                       <button
-                        className={`download-button ${status}`}
+                        className={`download-button ${isDownloading ? 'downloading' : isCompleted ? 'completed' : isError ? 'error' : 'idle'}`}
                         onClick={() => handleDownload(result.Id,
                           typeof result.Title === 'string' ? result.Title :
                           result.Title?.['en-US'] || 'Unknown Title')}
-                        disabled={status === 'downloading'}
+                        disabled={isDownloading}
                       >
-                        {status === 'downloading' && <span className="spinner"></span>}
-                        {status === 'completed' && '✓'}
-                        {status === 'error' && '✗'}
-                        {status === 'idle' && '⬇'}
+                        {isDownloading && <span className="spinner"></span>}
+                        {isCompleted && '✓'}
+                        {isError && '✗'}
+                        {!isDownloading && !isCompleted && !isError && '⬇'}
                         <span className="download-text">
-                          {status === 'downloading' ? 'Downloading...' :
-                           status === 'completed' ? 'Downloaded' :
-                           status === 'error' ? 'Failed' : 'Download'}
+                          {isDownloading ? 'Downloading...' :
+                           isCompleted ? 'Downloaded' :
+                           isError ? 'Failed' : 'Download'}
                         </span>
                       </button>
                     </div>
