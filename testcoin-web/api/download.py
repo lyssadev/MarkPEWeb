@@ -13,10 +13,8 @@ except ImportError as e:
     print(f"Import error: {e}")
     PlayFab = None
 
-# Get API key from environment variable
-MARKPE_API_KEY = os.getenv('MARKPE_API_KEY', 'markpe_api_key_2024')
 API_KEYS = {
-    hashlib.sha256(MARKPE_API_KEY.encode()).hexdigest(): "internal"
+    hashlib.sha256("markpe_api_key_2024".encode()).hexdigest(): "internal"
 }
 
 download_cooldowns = {}
