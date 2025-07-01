@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
 interface SearchResult {
@@ -21,6 +21,20 @@ function App() {
   const [error, setError] = useState('');
   const [noResultsError, setNoResultsError] = useState('');
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>({});
+
+  useEffect(() => {
+    console.log(`
+███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
+████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
+██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
+██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══██║██╔═══╝ ██║
+██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+
+MarkAPI v1.0 - Online and Detected
+Minecraft Marketplace Content Platform
+`);
+  }, []);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -156,12 +170,12 @@ function App() {
       <header className="App-header">
         <div className="title">
           <pre>{`
- __  __            _    _____  ______
-|  \\/  |          | |  |  __ \\|  ____|
-| \\  / | __ _ _ __| | _| |__) | |__
-| |\\/| |/ _\` | '__| |/ /  ___/|  __|
-| |  | | (_| | |  |   <| |    | |____
-|_|  |_|\\__,_|_|  |_|\\_\\_|    |______| 1.0
+███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██████╗ ███████╗
+████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔════╝
+██╔████╔██║███████║██████╔╝█████╔╝ ██████╔╝█████╗
+██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔═══╝ ██╔══╝
+██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║     ███████╗
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝ 1.0
           `}</pre>
         </div>
         <div className="search-container">
