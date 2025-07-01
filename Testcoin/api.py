@@ -51,8 +51,13 @@ security = HTTPBearer(auto_error=False)
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize settings on startup"""
+    """Initialize settings and authenticate on startup"""
     load_settings()
+    # Authenticate once at startup to avoid rate limits
+    global auth_token
+    if not auth_token:
+        if not auth_login():
+            print("Warning: Failed to authenticate at startup")
 
 class SearchRequest(BaseModel):
     query: str
@@ -160,10 +165,9 @@ def verify_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends
 @lru_cache(maxsize=100)
 def cached_search(query: str, search_type: str, limit: int):
     cache_key = f"{query}_{search_type}_{limit}"
-    
-    if not auth_token:
-        if not auth_login():
-            raise HTTPException(status_code=500, detail="Authentication failed")
+
+    # Use the global auth_token that was set at startup
+    global auth_token
     
     try:
         if "id=" in query or "minecraft.net" in query:
@@ -447,4 +451,6 @@ if __name__ == "__main__":
     load_settings()
 
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

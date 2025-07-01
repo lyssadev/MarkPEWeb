@@ -14,6 +14,9 @@ interface DownloadStatus {
   [key: string]: 'idle' | 'downloading' | 'completed' | 'error';
 }
 
+// API Configuration
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -45,8 +48,8 @@ Minecraft Marketplace Content Platform
     setResults([]);
 
     try {
-      // Use Vercel serverless function endpoint
-      const apiUrl = '/api/search';
+      // Use Testcoin FastAPI server endpoint
+      const apiUrl = `${API_BASE_URL}/api/search`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -104,7 +107,7 @@ Minecraft Marketplace Content Platform
     setDownloadStatus(prev => ({ ...prev, [itemId]: 'downloading' }));
 
     try {
-      const apiUrl = '/api/download';
+      const apiUrl = `${API_BASE_URL}/api/download`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
