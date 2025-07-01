@@ -45,10 +45,8 @@ Minecraft Marketplace Content Platform
     setResults([]);
 
     try {
-      // Use local search endpoint to bypass PlayFab rate limits
-      const apiUrl = process.env.NODE_ENV === 'production'
-        ? '/api/search'
-        : 'http://localhost:8000/api/search';
+      // Use Vercel serverless function endpoint
+      const apiUrl = '/api/search';
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -106,9 +104,7 @@ Minecraft Marketplace Content Platform
     setDownloadStatus(prev => ({ ...prev, [itemId]: 'downloading' }));
 
     try {
-      const apiUrl = process.env.NODE_ENV === 'production'
-        ? '/api/download'
-        : 'http://localhost:8000/api/download';
+      const apiUrl = '/api/download';
 
       const response = await fetch(apiUrl, {
         method: 'POST',
