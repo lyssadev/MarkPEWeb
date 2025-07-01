@@ -13,10 +13,21 @@
 
 # misc
 .DS_Store
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Sensitive configuration files
+api/settings.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
 
 npm-debug.log*
 yarn-debug.log*

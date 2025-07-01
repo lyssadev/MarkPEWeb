@@ -72,6 +72,18 @@ def configLoad():
         
 def configGet(key):
     global PLAYFAB_SETTINGS
+
+    # First check environment variables for security
+    if key == "CUSTOM_ID":
+        env_value = os.getenv('PLAYFAB_CUSTOM_ID')
+        if env_value:
+            return env_value
+    elif key == "PLAYER_SECRET":
+        env_value = os.getenv('PLAYFAB_PLAYER_SECRET')
+        if env_value:
+            return env_value
+
+    # Fallback to settings file
     configLoad()
     if key in PLAYFAB_SETTINGS:
         return PLAYFAB_SETTINGS[key]
