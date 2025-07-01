@@ -1,0 +1,24 @@
+{
+  "short_name": "MarkPE",
+  "name": "MarkPE v1.0 - Minecraft Marketplace Platform",
+  "description": "Search and download Minecraft Marketplace content with MarkPE v1.0",
+  "icons": [
+    {
+      "src": "markpe.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "markpe.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#4CAF50",
+  "background_color": "#1a1a1a",
+  "orientation": "portrait-primary",
+  "categories": ["games", "utilities"],
+  "lang": "en"
+}
