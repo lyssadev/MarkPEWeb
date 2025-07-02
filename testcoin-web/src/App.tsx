@@ -514,7 +514,7 @@ Minecraft Marketplace Content Platform
 ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 
-                    MarkAPI v1.1
+                    MarkPE v1.1
           `}</pre>
         </div>
         <div className="search-container">
