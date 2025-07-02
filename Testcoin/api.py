@@ -363,8 +363,8 @@ def check_download_rate_limit(user_id: str) -> bool:
     download_rate_limit[user_id] = current_time
     return True
 
-async def download_content_from_playfab(item_id: str) -> tuple[bytes, str]:
-    """Download content from PlayFab and return bytes and filename"""
+async def get_download_info_from_playfab(item_id: str) -> tuple[str, str]:
+    """Get download URL and filename from PlayFab without downloading"""
     try:
         # Use the exact same method that works in coin.py
         result = PlayFab.main([item_id])
@@ -389,22 +389,27 @@ async def download_content_from_playfab(item_id: str) -> tuple[bytes, str]:
         if not download_url:
             raise HTTPException(status_code=404, detail="No download URL found")
 
-        # Download the content
-        headers = {"User-Agent": "libhttpclient/1.0.0.0"}
-        response = requests.get(download_url, headers=headers, stream=True, timeout=60)
-        response.raise_for_status()
-
-        # Read content into memory
-        content_data = b""
-        for chunk in response.iter_content(chunk_size=8192):
-            content_data += chunk
-
         # Generate filename
         filename = f"{title.replace(' ', '_').replace('/', '_')}.zip"
         # Remove any invalid characters
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
 
-        return content_data, filename
+        return download_url, filename
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get download info: {str(e)}")
+
+def stream_download_from_url(download_url: str):
+    """Stream download from URL with proper chunking"""
+    try:
+        headers = {"User-Agent": "libhttpclient/1.0.0.0"}
+        response = requests.get(download_url, headers=headers, stream=True, timeout=60)
+        response.raise_for_status()
+
+        # Stream the content in chunks
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                yield chunk
 
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
@@ -426,19 +431,27 @@ async def download_content(
         )
 
     try:
-        content_data, filename = await download_content_from_playfab(request.item_id)
+        # Get download URL and filename from PlayFab
+        download_url, filename = await get_download_info_from_playfab(request.item_id)
 
-        # Return as streaming response
-        def generate():
-            yield content_data
+        # Get content length by making a HEAD request
+        headers = {"User-Agent": "libhttpclient/1.0.0.0"}
+        head_response = requests.head(download_url, headers=headers, timeout=30)
+        content_length = head_response.headers.get('content-length')
+
+        # Return as streaming response with real-time streaming
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+
+        # Only add Content-Length if we can determine it
+        if content_length:
+            response_headers["Content-Length"] = content_length
 
         return StreamingResponse(
-            generate(),
+            stream_download_from_url(download_url),
             media_type="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(len(content_data))
-            }
+            headers=response_headers
         )
 
     except HTTPException:

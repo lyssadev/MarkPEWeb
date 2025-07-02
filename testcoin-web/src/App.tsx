@@ -13,12 +13,13 @@ interface SearchResult {
 interface DownloadItem {
   id: string;
   title: string;
-  status: 'downloading' | 'completed' | 'error';
+  status: 'pending' | 'downloading' | 'completed' | 'error';
   progress: number;
   totalSize: number;
   downloadedSize: number;
   speed: number;
   startTime: number;
+  serverStatus?: string; // For showing server-side download status
 }
 
 interface Notification {
@@ -146,19 +147,30 @@ Minecraft Marketplace Content Platform
     // Add notification
     addNotification(`Starting download: ${title}`, 'info');
 
-    // Create download item
+    // Create download item with pending status
     const downloadItem: DownloadItem = {
       id: itemId,
       title,
-      status: 'downloading',
+      status: 'pending',
       progress: 0,
       totalSize: 0,
       downloadedSize: 0,
       speed: 0,
-      startTime: Date.now()
+      startTime: Date.now(),
+      serverStatus: 'Server fetching content...'
     };
 
     setDownloads(prev => [...prev.filter(d => d.id !== itemId), downloadItem]);
+
+    // Set a timeout to update server status if it takes too long
+    const serverStatusTimeout = setTimeout(() => {
+      setDownloads(prev => prev.map(d =>
+        d.id === itemId && d.status === 'pending' ? {
+          ...d,
+          serverStatus: 'Server processing... This may take a moment.'
+        } : d
+      ));
+    }, 3000); // Show after 3 seconds
 
     try {
       const apiUrl = `${API_BASE_URL}/api/download`;
@@ -181,9 +193,17 @@ Minecraft Marketplace Content Platform
       const contentLength = response.headers.get('content-length');
       const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
 
-      // Update download item with total size
+      // Clear the server status timeout since we got a response
+      clearTimeout(serverStatusTimeout);
+
+      // Update download item with total size and change status to downloading
       setDownloads(prev => prev.map(d =>
-        d.id === itemId ? { ...d, totalSize } : d
+        d.id === itemId ? {
+          ...d,
+          totalSize,
+          status: 'downloading',
+          serverStatus: undefined // Clear server status when actual download starts
+        } : d
       ));
 
       // Get the filename from response headers or use a default
@@ -258,6 +278,9 @@ Minecraft Marketplace Content Platform
     } catch (err) {
       console.error('Download error:', err);
 
+      // Clear the server status timeout on error
+      clearTimeout(serverStatusTimeout);
+
       // Mark as error
       setDownloads(prev => prev.map(d =>
         d.id === itemId ? { ...d, status: 'error' } : d
@@ -312,22 +335,37 @@ Minecraft Marketplace Content Platform
                       ></div>
                     </div>
                     <div className="progress-text">
-                      {download.progress.toFixed(1)}%
+                      {download.status === 'pending' ? 'Pending...' :
+                       download.totalSize > 0 ? `${download.progress.toFixed(1)}%` :
+                       download.downloadedSize > 0 ? 'Downloading...' : '0%'}
                     </div>
                   </div>
                   <div className="download-stats">
-                    <span className="download-size">
-                      {formatBytes(download.downloadedSize)} / {formatBytes(download.totalSize)}
-                    </span>
-                    {download.status === 'downloading' && download.speed > 0 && (
-                      <span className="download-speed">
-                        {formatSpeed(download.speed)}
+                    {download.status === 'pending' ? (
+                      <span className="server-status">
+                        {download.serverStatus || 'Preparing download...'}
                       </span>
+                    ) : (
+                      <>
+                        <span className="download-size">
+                          {download.totalSize > 0 ?
+                            `${formatBytes(download.downloadedSize)} / ${formatBytes(download.totalSize)}` :
+                            download.downloadedSize > 0 ?
+                              `${formatBytes(download.downloadedSize)} downloaded` :
+                              'Preparing...'
+                          }
+                        </span>
+                        {download.status === 'downloading' && download.speed > 0 && (
+                          <span className="download-speed">
+                            {formatSpeed(download.speed)}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
                 <div className="download-status">
-                  {download.status === 'downloading' && <div className="spinner-small"></div>}
+                  {(download.status === 'pending' || download.status === 'downloading') && <div className="spinner-small"></div>}
                   {download.status === 'completed' && <span className="status-icon">✓</span>}
                   {download.status === 'error' && <span className="status-icon error">✗</span>}
                 </div>
@@ -392,9 +430,11 @@ Minecraft Marketplace Content Platform
             <div className="results-list">
               {results.map((result, index) => {
                 const downloadItem = downloads.find(d => d.id === result.Id);
+                const isPending = downloadItem?.status === 'pending';
                 const isDownloading = downloadItem?.status === 'downloading';
                 const isCompleted = downloadItem?.status === 'completed';
                 const isError = downloadItem?.status === 'error';
+                const isActive = isPending || isDownloading;
 
                 return (
                   <div key={result.Id} className="result-item">
@@ -419,18 +459,19 @@ Minecraft Marketplace Content Platform
                     </div>
                     <div className="result-actions">
                       <button
-                        className={`download-button ${isDownloading ? 'downloading' : isCompleted ? 'completed' : isError ? 'error' : 'idle'}`}
+                        className={`download-button ${isPending ? 'pending' : isDownloading ? 'downloading' : isCompleted ? 'completed' : isError ? 'error' : 'idle'}`}
                         onClick={() => handleDownload(result.Id,
                           typeof result.Title === 'string' ? result.Title :
                           result.Title?.['en-US'] || 'Unknown Title')}
-                        disabled={isDownloading}
+                        disabled={isActive}
                       >
-                        {isDownloading && <span className="spinner"></span>}
+                        {(isPending || isDownloading) && <span className="spinner"></span>}
                         {isCompleted && '✓'}
                         {isError && '✗'}
-                        {!isDownloading && !isCompleted && !isError && '⬇'}
+                        {!isPending && !isDownloading && !isCompleted && !isError && '⬇'}
                         <span className="download-text">
-                          {isDownloading ? 'Downloading...' :
+                          {isPending ? 'Preparing...' :
+                           isDownloading ? 'Downloading...' :
                            isCompleted ? 'Downloaded' :
                            isError ? 'Failed' : 'Download'}
                         </span>
