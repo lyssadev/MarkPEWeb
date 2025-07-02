@@ -13,6 +13,8 @@ import zipfile
 import requests
 from functools import lru_cache
 import hashlib
+import shutil
+import uuid as uuid_module
 
 import PlayFab
 from coin import (
@@ -73,6 +75,7 @@ class SearchResponse(BaseModel):
 
 class DownloadRequest(BaseModel):
     item_id: str
+    process_content: Optional[bool] = False  # Whether to process like coin.py
 
 class ErrorResponse(BaseModel):
     success: bool
@@ -363,8 +366,8 @@ def check_download_rate_limit(user_id: str) -> bool:
     download_rate_limit[user_id] = current_time
     return True
 
-async def get_download_info_from_playfab(item_id: str) -> tuple[str, str]:
-    """Get download URL and filename from PlayFab without downloading"""
+async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
+    """Get download URL, filename, and content info from PlayFab"""
     try:
         # Use the exact same method that works in coin.py
         result = PlayFab.main([item_id])
@@ -379,6 +382,54 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str]:
         if not contents:
             raise HTTPException(status_code=404, detail="No downloadable content found")
 
+        # Analyze content to detect types
+        content_info = {
+            "title": title,
+            "content_types": [],
+            "playfab_content_types": [],
+            "playfab_contents": contents,  # Include full PlayFab contents data
+            "total_files": len(contents),
+            "has_multiple_types": False
+        }
+
+        # Extract PlayFab content types like coin.py does
+        for content in contents:
+            content_type = content.get("Type", "")
+            if content_type:
+                content_info["playfab_content_types"].append(content_type)
+
+        # Detect content types from tags and other metadata
+        tags = item.get("Tags", [])
+        for tag in tags:
+            tag_lower = tag.lower()
+            if "skin" in tag_lower:
+                content_info["content_types"].append("Skin Pack")
+            elif "resource" in tag_lower or "texture" in tag_lower:
+                content_info["content_types"].append("Resource Pack")
+            elif "addon" in tag_lower or "behavior" in tag_lower:
+                content_info["content_types"].append("Add-On")
+            elif "world" in tag_lower or "map" in tag_lower:
+                content_info["content_types"].append("World")
+            elif "mashup" in tag_lower:
+                content_info["content_types"].append("Mashup Pack")
+
+        # Also detect from PlayFab content types
+        for content_type in content_info["playfab_content_types"]:
+            if content_type in {"skinbinary", "personabinary"}:
+                if "Skin Pack" not in content_info["content_types"]:
+                    content_info["content_types"].append("Skin Pack")
+
+        # If no types detected from tags, try to infer from content
+        if not content_info["content_types"]:
+            # Default based on common patterns
+            if len(contents) > 1:
+                content_info["content_types"].append("Mixed Content")
+            else:
+                content_info["content_types"].append("Content Pack")
+
+        # Check if there are multiple types
+        content_info["has_multiple_types"] = len(content_info["content_types"]) > 1 or len(contents) > 1
+
         # Get the first available download URL
         download_url = None
         for content in contents:
@@ -389,15 +440,208 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str]:
         if not download_url:
             raise HTTPException(status_code=404, detail="No download URL found")
 
-        # Generate filename
-        filename = f"{title.replace(' ', '_').replace('/', '_')}.zip"
+        # Generate filename with content type info
+        content_type_str = " + ".join(content_info["content_types"]) if content_info["content_types"] else "Content"
+        if content_info["has_multiple_types"]:
+            filename = f"{title.replace(' ', '_').replace('/', '_')}_({content_type_str}).zip"
+        else:
+            filename = f"{title.replace(' ', '_').replace('/', '_')}.zip"
+
         # Remove any invalid characters
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
 
-        return download_url, filename
+        return download_url, filename, content_info
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get download info: {str(e)}")
+
+def load_keys_from_files():
+    """Load keys from keys.tsv and personal_keys.tsv files like coin.py does"""
+    files_to_check = ["keys.tsv", "personal_keys.tsv"]
+    loaded_lines = []
+
+    for file_name in files_to_check:
+        try:
+            with open(file_name, "r") as keys_file:
+                loaded_lines.extend(keys_file.readlines())
+        except FileNotFoundError:
+            if file_name == "keys.tsv":
+                print("'keys.tsv' file not found.")
+            continue
+
+    return loaded_lines
+
+def check_custom_id(custom_ids, loaded_lines):
+    """Check if item ID exists in keys like coin.py does"""
+    if isinstance(custom_ids, str):
+        custom_ids = {custom_ids}
+    elif isinstance(custom_ids, list):
+        custom_ids = set(custom_ids)
+
+    for line in loaded_lines:
+        for id in custom_ids:
+            if id in line:
+                return True
+
+    return False
+
+def process_content_like_coin(item_id: str, download_url: str, title: str, content_info: dict) -> tuple[str, str]:
+    """Process content using coin.py's exact download and processing mechanism"""
+    import tempfile
+    import shutil
+    import os
+    import zipfile
+    import coin
+    import dlc
+
+    # Create temporary directories like coin.py does
+    temp_dir = tempfile.mkdtemp(prefix="markpe_temp_")
+    download_output_folder = os.path.join(temp_dir, "download")
+    final_output_folder = os.path.join(temp_dir, "output")
+    os.makedirs(download_output_folder, exist_ok=True)
+    os.makedirs(final_output_folder, exist_ok=True)
+
+    try:
+        print(f"Processing content: {title}")
+        print(f"Download URL: {download_url}")
+
+        # Load keys like coin.py does
+        loaded_keys = load_keys_from_files()
+        has_key_available = check_custom_id(item_id, loaded_keys)
+        print(f"Key availability check for {item_id}: {has_key_available}")
+
+        # Get all content URLs from PlayFab data like coin.py does
+        skin_urls = []
+        other_urls = []
+
+        # Extract URLs from content info like coin.py does
+        playfab_contents = content_info.get("playfab_contents", [])
+        for content in playfab_contents:
+            if content.get("Type") in {"skinbinary", "personabinary"}:
+                skin_urls.append(content["Url"])
+            elif has_key_available:
+                other_urls.append(content["Url"])
+            else:
+                print(f"Key not available for content type: {content.get('Type')} - skipping")
+
+        print(f"Found {len(skin_urls)} skin URLs and {len(other_urls)} other URLs")
+
+        processed_files = []
+
+        # Process all URLs like coin.py does (skin_urls + other_urls)
+        all_urls = other_urls + skin_urls
+        for url_index, url in enumerate(all_urls):
+            print(f"Processing URL {url_index + 1}/{len(all_urls)}: {url}")
+
+            # Use coin.py's download_and_process_zip function
+            extracted_pack_folders = coin.download_and_process_zip(url, download_output_folder)
+            if extracted_pack_folders is None:
+                print(f"Failed to download and extract from URL: {url}")
+                continue
+
+            print(f"Extracted {len(extracted_pack_folders)} pack folders from URL")
+
+            # Determine if this URL is for skin content
+            is_skin = url in skin_urls
+
+            if is_skin:
+                # Process as skin pack (always process, regardless of key availability)
+                for folder_name, pack_folder in extracted_pack_folders:
+                    try:
+                        first_uuid = coin.data_uuid(pack_folder)
+                        print(f"Processing skin pack: {folder_name}")
+
+                        # Use dlc.skin_main like coin.py does
+                        dlc.skin_main(pack_folder, final_output_folder)
+
+                        # Check what files were created
+                        for output_file in os.listdir(final_output_folder):
+                            if output_file.endswith(('.mcpack', '.zip')) and output_file not in processed_files:
+                                processed_files.append(output_file)
+                                print(f"Created skin pack: {output_file}")
+
+                    except Exception as e:
+                        print(f"Skin processing failed for {folder_name}: {e}")
+                        coin.log_error(first_uuid if 'first_uuid' in locals() else None, e)
+            else:
+                # Process as DLC/resource/addon (separate into addon vs dlc folders)
+                addon_folders = []
+                dlc_folders = []
+
+                for folder_name, pack_folder in extracted_pack_folders:
+                    is_addon_flag = coin.check_for_addon(pack_folder)
+                    if is_addon_flag:
+                        addon_folders.append(pack_folder)
+                        print(f"Identified addon folder: {folder_name}")
+                    else:
+                        dlc_folders.append(pack_folder)
+                        print(f"Identified DLC/resource folder: {folder_name}")
+
+                # Process addon folders
+                if addon_folders:
+                    try:
+                        print(f"Processing {len(addon_folders)} addon folders")
+                        dlc.main(addon_folders, ["keys.tsv", "personal_keys.tsv"], final_output_folder, is_addon=True)
+
+                        # Check what files were created
+                        for output_file in os.listdir(final_output_folder):
+                            if output_file.endswith(('.mcaddon', '.mcpack')) and output_file not in processed_files:
+                                processed_files.append(output_file)
+                                print(f"Created addon: {output_file}")
+                    except Exception as e:
+                        print(f"Addon processing failed: {e}")
+
+                # Process DLC folders
+                if dlc_folders:
+                    try:
+                        print(f"Processing {len(dlc_folders)} DLC folders")
+                        dlc.main(dlc_folders, ["keys.tsv", "personal_keys.tsv"], final_output_folder, is_addon=False)
+
+                        # Check what files were created
+                        for output_file in os.listdir(final_output_folder):
+                            if output_file.endswith(('.mcpack', '.mctemplate')) and output_file not in processed_files:
+                                processed_files.append(output_file)
+                                print(f"Created DLC/resource: {output_file}")
+                    except Exception as e:
+                        print(f"DLC processing failed: {e}")
+
+        print(f"Found {len(processed_files)} processed files: {processed_files}")
+
+        if not processed_files:
+            raise Exception("No content files were successfully processed")
+
+        # If multiple files, create a ZIP containing all of them
+        if len(processed_files) > 1:
+            zip_filename = f"{title.replace(' ', '_').replace('/', '_')}_content.zip"
+            zip_path = os.path.join(final_output_folder, zip_filename)
+
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for file in processed_files:
+                    file_path = os.path.join(final_output_folder, file)
+                    if os.path.exists(file_path):
+                        zipf.write(file_path, file)
+
+            # Get file size
+            file_size = os.path.getsize(zip_path)
+            print(f"Created combined ZIP: {zip_filename} ({file_size} bytes)")
+            return zip_filename, zip_path
+        else:
+            # Single file
+            filename = processed_files[0]
+            file_path = os.path.join(final_output_folder, filename)
+            file_size = os.path.getsize(file_path)
+            print(f"Returning single processed file: {filename} ({file_size} bytes)")
+            return filename, file_path
+
+    except Exception as e:
+        print(f"Content processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Content processing failed: {str(e)}")
+    finally:
+        # Clean up the download folder but keep the final output
+        if os.path.exists(download_output_folder):
+            shutil.rmtree(download_output_folder, ignore_errors=True)
 
 def stream_download_from_url(download_url: str):
     """Stream download from URL with proper chunking"""
@@ -416,6 +660,19 @@ def stream_download_from_url(download_url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
+def stream_file_from_path(file_path: str):
+    """Stream file directly from disk to avoid memory issues"""
+    try:
+        with open(file_path, 'rb') as f:
+            chunk_size = 8192
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File streaming failed: {str(e)}")
+
 @app.post("/api/download")
 async def download_content(
     request: DownloadRequest,
@@ -431,28 +688,81 @@ async def download_content(
         )
 
     try:
-        # Get download URL and filename from PlayFab
-        download_url, filename = await get_download_info_from_playfab(request.item_id)
+        # Get download URL, filename, and content info from PlayFab
+        download_url, filename, content_info = await get_download_info_from_playfab(request.item_id)
 
-        # Get content length by making a HEAD request
-        headers = {"User-Agent": "libhttpclient/1.0.0.0"}
-        head_response = requests.head(download_url, headers=headers, timeout=30)
-        content_length = head_response.headers.get('content-length')
+        if request.process_content:
+            # Process content like coin.py does
+            processed_filename, file_path = process_content_like_coin(request.item_id, download_url, content_info["title"], content_info)
 
-        # Return as streaming response with real-time streaming
-        response_headers = {
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        }
+            # Determine media type based on file extension
+            if processed_filename.endswith('.zip'):
+                media_type = "application/zip"
+            elif processed_filename.endswith('.mcpack'):
+                media_type = "application/octet-stream"
+            elif processed_filename.endswith('.mctemplate'):
+                media_type = "application/octet-stream"
+            elif processed_filename.endswith('.mcaddon'):
+                media_type = "application/octet-stream"
+            else:
+                media_type = "application/zip"
 
-        # Only add Content-Length if we can determine it
-        if content_length:
-            response_headers["Content-Length"] = content_length
+            # Get file size
+            file_size = os.path.getsize(file_path)
 
-        return StreamingResponse(
-            stream_download_from_url(download_url),
-            media_type="application/zip",
-            headers=response_headers
-        )
+            # Create a streaming response that cleans up after itself
+            def file_streamer():
+                try:
+                    yield from stream_file_from_path(file_path)
+                finally:
+                    # Clean up the output directory after streaming
+                    output_dir = os.path.dirname(file_path)
+                    try:
+                        shutil.rmtree(output_dir, ignore_errors=True)
+                    except:
+                        pass
+
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="{processed_filename}"',
+                "X-Content-Types": ", ".join(content_info["content_types"]),
+                "X-Content-Title": content_info["title"],
+                "X-Total-Files": str(content_info["total_files"]),
+                "X-Has-Multiple-Types": str(content_info["has_multiple_types"]).lower(),
+                "X-Processed": "true",
+                "Content-Length": str(file_size)
+            }
+
+            return StreamingResponse(
+                file_streamer(),
+                media_type=media_type,
+                headers=response_headers
+            )
+        else:
+            # Original behavior - stream directly from PlayFab
+            # Get content length by making a HEAD request
+            headers = {"User-Agent": "libhttpclient/1.0.0.0"}
+            head_response = requests.head(download_url, headers=headers, timeout=30)
+            content_length = head_response.headers.get('content-length')
+
+            # Return as streaming response with real-time streaming and content info
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Content-Types": ", ".join(content_info["content_types"]),
+                "X-Content-Title": content_info["title"],
+                "X-Total-Files": str(content_info["total_files"]),
+                "X-Has-Multiple-Types": str(content_info["has_multiple_types"]).lower(),
+                "X-Processed": "false"
+            }
+
+            # Only add Content-Length if we can determine it
+            if content_length:
+                response_headers["Content-Length"] = content_length
+
+            return StreamingResponse(
+                stream_download_from_url(download_url),
+                media_type="application/zip",
+                headers=response_headers
+            )
 
     except HTTPException:
         raise

@@ -20,6 +20,9 @@ interface DownloadItem {
   speed: number;
   startTime: number;
   serverStatus?: string; // For showing server-side download status
+  contentTypes?: string; // Content types (e.g., "Skin Pack + Resource Pack")
+  hasMultipleTypes?: boolean; // Whether this contains multiple content types
+  totalFiles?: string; // Number of files in the package
 }
 
 interface Notification {
@@ -40,6 +43,7 @@ function App() {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isDownloadPanelOpen, setIsDownloadPanelOpen] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     console.log(`
@@ -50,9 +54,16 @@ function App() {
 ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 
-MarkAPI v1.0 - Online and Detected
+MarkAPI v1.1 - Online and Detected
 Minecraft Marketplace Content Platform
 `);
+
+    // Handle initial load animation timing
+    const timer = setTimeout(() => {
+      setIsInitialLoad(false);
+    }, 3000); // Animation completes after 3 seconds
+
+    return () => clearTimeout(timer);
   }, []);
 
   const handleSearch = async () => {
@@ -182,7 +193,8 @@ Minecraft Marketplace Content Platform
           'Authorization': 'Bearer markpe_api_key_2024'
         },
         body: JSON.stringify({
-          item_id: itemId
+          item_id: itemId,
+          process_content: true  // Enable processing like coin.py
         })
       });
 
@@ -193,14 +205,23 @@ Minecraft Marketplace Content Platform
       const contentLength = response.headers.get('content-length');
       const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
 
+      // Get content type information from headers
+      const contentTypes = response.headers.get('x-content-types') || 'Content Pack';
+      const hasMultipleTypes = response.headers.get('x-has-multiple-types') === 'true';
+      const totalFiles = response.headers.get('x-total-files') || '1';
+      const isProcessed = response.headers.get('x-processed') === 'true';
+
       // Clear the server status timeout since we got a response
       clearTimeout(serverStatusTimeout);
 
-      // Update download item with total size and change status to downloading
+      // Update download item with total size, content info, and change status to downloading
       setDownloads(prev => prev.map(d =>
         d.id === itemId ? {
           ...d,
           totalSize,
+          contentTypes: isProcessed ? `${contentTypes} (Processed)` : contentTypes,
+          hasMultipleTypes,
+          totalFiles,
           status: 'downloading',
           serverStatus: undefined // Clear server status when actual download starts
         } : d
@@ -381,7 +402,7 @@ Minecraft Marketplace Content Platform
   };
 
   return (
-    <div className="App">
+    <div className={`App ${isInitialLoad ? 'initial-load' : ''}`}>
       {/* Notifications */}
       <div className="notifications-container">
         {notifications.map((notification) => (
@@ -412,6 +433,14 @@ Minecraft Marketplace Content Platform
               <div key={download.id} className={`download-item ${download.status}`}>
                 <div className="download-info">
                   <div className="download-title">{download.title}</div>
+                  {download.contentTypes && (
+                    <div className="download-content-type">
+                      {download.contentTypes}
+                      {download.hasMultipleTypes && download.totalFiles && (
+                        <span className="file-count"> ({download.totalFiles} files)</span>
+                      )}
+                    </div>
+                  )}
                   <div className="download-progress">
                     <div className="progress-bar">
                       <div
@@ -478,12 +507,14 @@ Minecraft Marketplace Content Platform
 
         <div className="title">
           <pre>{`
-███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██████╗ ███████╗
-████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔════╝
-██╔████╔██║███████║██████╔╝█████╔╝ ██████╔╝█████╗
-██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔═══╝ ██╔══╝
-██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║     ███████╗
-╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝ 1.0
+███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
+████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
+██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
+██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══██║██╔═══╝ ██║
+██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+
+                    MarkAPI v1.1
           `}</pre>
         </div>
         <div className="search-container">
