@@ -223,45 +223,130 @@ Minecraft Marketplace Content Platform
       let downloadedSize = 0;
       const startTime = Date.now();
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
 
-          chunks.push(value);
-          downloadedSize += value.length;
+      console.log('Starting to read response stream...');
 
-          const currentTime = Date.now();
-          const elapsedTime = (currentTime - startTime) / 1000; // seconds
-          const speed = elapsedTime > 0 ? downloadedSize / elapsedTime : 0;
-          const progress = totalSize > 0 ? (downloadedSize / totalSize) * 100 : 0;
-
-          // Update download progress - capture values to avoid closure issues
-          const currentDownloadedSize = downloadedSize;
-          const currentProgress = Math.min(progress, 100);
-          const currentSpeed = speed;
-
-          setDownloads(prev => prev.map(d =>
-            d.id === itemId ? {
-              ...d,
-              downloadedSize: currentDownloadedSize,
-              progress: currentProgress,
-              speed: currentSpeed
-            } : d
-          ));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          console.log(`Stream reading completed. Total chunks: ${chunks.length}, Total size: ${downloadedSize} bytes`);
+          break;
         }
+
+        if (!value || value.length === 0) {
+          console.warn('Received empty chunk, skipping...');
+          continue;
+        }
+
+        chunks.push(value);
+        downloadedSize += value.length;
+
+        const currentTime = Date.now();
+        const elapsedTime = (currentTime - startTime) / 1000; // seconds
+        const speed = elapsedTime > 0 ? downloadedSize / elapsedTime : 0;
+        const progress = totalSize > 0 ? (downloadedSize / totalSize) * 100 : 0;
+
+        // Update download progress - capture values to avoid closure issues
+        const currentDownloadedSize = downloadedSize;
+        const currentProgress = Math.min(progress, 100);
+        const currentSpeed = speed;
+
+        // Log progress every 1MB or so
+        if (downloadedSize % (1024 * 1024) < value.length) {
+          console.log(`Download progress: ${formatBytes(downloadedSize)} at ${formatSpeed(speed)}`);
+        }
+
+        setDownloads(prev => prev.map(d =>
+          d.id === itemId ? {
+            ...d,
+            downloadedSize: currentDownloadedSize,
+            progress: currentProgress,
+            speed: currentSpeed
+          } : d
+        ));
       }
 
       // Create blob and download
-      const blob = new Blob(chunks);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      console.log(`Creating blob from ${chunks.length} chunks, total size: ${downloadedSize} bytes`);
+      const blob = new Blob(chunks, { type: 'application/zip' });
+      console.log(`Blob created with size: ${blob.size} bytes`);
+
+      if (blob.size === 0) {
+        throw new Error('Downloaded file is empty - no data received from server');
+      }
+
+      // Check if browser supports downloads
+      if (!window.URL || !window.URL.createObjectURL) {
+        throw new Error('Browser does not support file downloads');
+      }
+
+      // Log security context info
+      console.log(`Download context - HTTPS: ${window.location.protocol === 'https:'}, Secure Context: ${window.isSecureContext}`);
+
+      // Warn if not in secure context (some browsers may block downloads)
+      if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+        console.warn('Not in secure context - downloads may be blocked by browser');
+      }
+
+      // Try multiple download methods for better compatibility
+      try {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+
+        console.log(`Triggering download for file: ${filename}`);
+        a.click();
+
+        // Notify user that download is being saved
+        addNotification(`Saving ${filename} to device...`, 'info');
+
+        // Clean up after a short delay
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          if (document.body.contains(a)) {
+            document.body.removeChild(a);
+          }
+        }, 1000);
+
+      } catch (downloadError) {
+        console.error('Primary download method failed:', downloadError);
+
+        // Fallback: try using a different approach
+        try {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.setAttribute('download', filename);
+          link.style.display = 'none';
+
+          // Try using mouse event
+          const event = new MouseEvent('click', {
+            view: window,
+            bubbles: true,
+            cancelable: true
+          });
+
+          document.body.appendChild(link);
+          link.dispatchEvent(event);
+
+          setTimeout(() => {
+            URL.revokeObjectURL(url);
+            if (document.body.contains(link)) {
+              document.body.removeChild(link);
+            }
+          }, 1000);
+
+        } catch (fallbackError) {
+          console.error('Fallback download method also failed:', fallbackError);
+          throw new Error('Unable to save file to device. Please check browser permissions.');
+        }
+      }
 
       // Mark as completed
       setDownloads(prev => prev.map(d =>
