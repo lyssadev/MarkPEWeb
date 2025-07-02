@@ -24,7 +24,6 @@ from coin import (
     load_settings,
     auth_token
 )
-
 # Import TSV-based search functionality
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), 'decrypted_tsvpy'))
@@ -517,12 +516,18 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
         # Extract URLs from content info like coin.py does
         playfab_contents = content_info.get("playfab_contents", [])
         for content in playfab_contents:
-            if content.get("Type") in {"skinbinary", "personabinary"}:
+            content_type = content.get("Type", "")
+            if content_type in {"skinbinary", "personabinary"}:
+                # Skins always use hardcoded key, no TSV key needed
                 skin_urls.append(content["Url"])
             elif has_key_available:
+                # If we have keys for this item, process all other content
                 other_urls.append(content["Url"])
             else:
-                print(f"Key not available for content type: {content.get('Type')} - skipping")
+                # Try to process anyway - some content might not be encrypted
+                # or might use default/hardcoded keys
+                other_urls.append(content["Url"])
+                print(f"No key found for {item_id}, attempting to process {content_type} anyway")
 
         print(f"Found {len(skin_urls)} skin URLs and {len(other_urls)} other URLs")
 
@@ -604,11 +609,21 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
                                 print(f"Created DLC/resource: {output_file}")
                     except Exception as e:
                         print(f"DLC processing failed: {e}")
+                        # Continue processing other content instead of failing completely
 
         print(f"Found {len(processed_files)} processed files: {processed_files}")
 
         if not processed_files:
-            raise Exception("No content files were successfully processed")
+            # Provide more detailed error information
+            error_msg = f"No content files were successfully processed for '{title}' (ID: {item_id}). "
+            if not has_key_available and not skin_urls:
+                error_msg += "This content requires decryption keys that are not available. "
+                error_msg += "Try adding the required keys to keys.tsv or personal_keys.tsv files."
+            elif not all_urls:
+                error_msg += "No downloadable content URLs were found in the PlayFab response."
+            else:
+                error_msg += f"Processing failed for all {len(all_urls)} content URLs."
+            raise Exception(error_msg)
 
         # If multiple files, create a ZIP containing all of them
         if len(processed_files) > 1:
