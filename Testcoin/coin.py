@@ -1,3 +1,12 @@
+# ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
+# ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
+# ██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
+# ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══██║██╔═══╝ ██║
+# ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
+# ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+#
+# This code was modified by Lisa, you are free to make any changes as long as you know what you are doing :3
+
 import subprocess
 import sys
 def ensure_packages_installed():
@@ -59,7 +68,7 @@ title = colorama.Fore.YELLOW + r"""
 | \  / | __ _ _ __| | _| |__) | |__
 | |\/| |/ _` | '__| |/ /  ___/|  __|
 | |  | | (_| | |  |   <| |    | |____
-|_|  |_|\__,_|_|  |_|\_\_|    |______| 1.0""" + colorama.Style.RESET_ALL
+|_|  |_|\__,_|_|  |_|\_\_|    |______| 1.2""" + colorama.Style.RESET_ALL
 
 print(title)
 print()

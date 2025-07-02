@@ -4,6 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from contextlib import asynccontextmanager
 import re
 import json
 import os
@@ -15,6 +16,18 @@ from functools import lru_cache
 import hashlib
 import shutil
 import uuid as uuid_module
+import asyncio
+import concurrent.futures
+from threading import Lock
+
+# ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
+# ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
+# ██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
+# ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══██║██╔═══╝ ██║
+# ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
+# ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+#
+# This code was written by Lisa, you are free to make any changes as long as you know what you are doing :3
 
 import PlayFab
 from coin import (
@@ -24,7 +37,6 @@ from coin import (
     load_settings,
     auth_token
 )
-# Import TSV-based search functionality
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), 'decrypted_tsvpy'))
 try:
@@ -34,31 +46,31 @@ except ImportError:
     check_dlc_list = None
     read_local_file = None
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_settings()
+    global auth_token
+    if not auth_token:
+        if not auth_login():
+            print("Warning: Failed to authenticate at startup")
+    yield
+
 app = FastAPI(
     title="MarkPE API",
     description="MarkPE Content Search API",
-    version="1.0"
+    version="1.2",
+    lifespan=lifespan
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for now
-    allow_credentials=False,  # Set to False when using allow_origins=["*"]
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 security = HTTPBearer(auto_error=False)
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize settings and authenticate on startup"""
-    load_settings()
-    # Authenticate once at startup to avoid rate limits
-    global auth_token
-    if not auth_token:
-        if not auth_login():
-            print("Warning: Failed to authenticate at startup")
 
 class SearchRequest(BaseModel):
     query: str
@@ -74,7 +86,7 @@ class SearchResponse(BaseModel):
 
 class DownloadRequest(BaseModel):
     item_id: str
-    process_content: Optional[bool] = False  # Whether to process like coin.py
+    process_content: Optional[bool] = False
 
 class ErrorResponse(BaseModel):
     success: bool
@@ -85,16 +97,17 @@ API_KEYS = {
     hashlib.sha256("markpe_api_key_2024".encode()).hexdigest(): "internal"
 }
 
-# Rate limiting for downloads
 download_rate_limit = {}
-DOWNLOAD_RATE_LIMIT_SECONDS = 30  # 30 seconds between downloads per user
+active_downloads = {}
+download_lock = Lock()
+DOWNLOAD_RATE_LIMIT_SECONDS = 5
+MAX_CONCURRENT_DOWNLOADS_PER_USER = 3
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
 def search_local_data(query, search_type="name", limit=50):
-    """Search using local list.txt data to bypass PlayFab rate limits"""
     results = []
 
     try:
-        # Search in list.txt for content names
         list_file_path = os.path.join(os.path.dirname(__file__), "list.txt")
         if os.path.exists(list_file_path):
             with open(list_file_path, 'r', encoding='utf-8') as f:
@@ -104,8 +117,6 @@ def search_local_data(query, search_type="name", limit=50):
                         continue
 
                     try:
-                        # Parse format: "Title ( Creator ) - Type UUID"
-                        # Example: "Desert Creatures ( Everbloom Games ) - DLC 09c78020-d7df-4085-9de2-3b8e43d30c82"
                         parts = line.rsplit(' - ', 1)
                         if len(parts) != 2:
                             continue
@@ -113,7 +124,6 @@ def search_local_data(query, search_type="name", limit=50):
                         title_creator = parts[0].strip()
                         type_uuid = parts[1].strip()
 
-                        # Extract type and UUID
                         type_parts = type_uuid.split(' ', 1)
                         if len(type_parts) != 2:
                             continue
@@ -121,7 +131,6 @@ def search_local_data(query, search_type="name", limit=50):
                         content_type = type_parts[0].strip()
                         uuid = type_parts[1].strip()
 
-                        # Extract title and creator
                         if ' ( ' in title_creator and title_creator.endswith(' )'):
                             title_end = title_creator.rfind(' ( ')
                             title = title_creator[:title_end].strip()
@@ -130,9 +139,7 @@ def search_local_data(query, search_type="name", limit=50):
                             title = title_creator
                             creator = "Unknown"
 
-                        # Filter by search query
                         if query.lower() in title.lower():
-                            # Convert to PlayFab-like format for compatibility
                             result = {
                                 "Id": uuid,
                                 "Title": {"en-US": title},
@@ -154,6 +161,35 @@ def search_local_data(query, search_type="name", limit=50):
 
     return results
 
+def enrich_local_results_with_images(results):
+    """Enrich local search results with image data from PlayFab"""
+    enriched_results = []
+
+    if not results:
+        return enriched_results
+
+    try:
+        item_ids = [result["Id"] for result in results]
+
+        playfab_data = PlayFab.main(item_ids)
+
+        if playfab_data:
+            for result in results:
+                item_id = result["Id"]
+                if item_id in playfab_data:
+                    playfab_item = playfab_data[item_id]
+                    result["Images"] = playfab_item.get("Images", [])
+
+                enriched_results.append(result)
+        else:
+            enriched_results = results
+
+    except Exception as e:
+        print(f"Error enriching local results with images: {e}")
+        enriched_results = results
+
+    return enriched_results
+
 def verify_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     if not credentials:
         raise HTTPException(status_code=401, detail="API key required")
@@ -168,7 +204,6 @@ def verify_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends
 def cached_search(query: str, search_type: str, limit: int):
     cache_key = f"{query}_{search_type}_{limit}"
 
-    # Use the global auth_token that was set at startup
     global auth_token
     
     try:
@@ -198,11 +233,10 @@ def cached_search(query: str, search_type: str, limit: int):
         
         else:
             try:
-                # Try PlayFab search first
                 data = perform_search(
                     query="",
                     orderBy="creationDate DESC",
-                    select="contents",
+                    select="contents,images",
                     top=min(limit, 300),
                     skip=0,
                     search_term=query,
@@ -227,28 +261,28 @@ def cached_search(query: str, search_type: str, limit: int):
                 }
 
             except Exception as playfab_error:
-                # If PlayFab fails (rate limit, etc.), fall back to local search
                 print(f"PlayFab search failed, using local data: {playfab_error}")
 
                 local_results = search_local_data(query, search_type, limit)
+                enriched_results = enrich_local_results_with_images(local_results)
 
                 return {
                     "success": True,
-                    "data": local_results,
-                    "total": len(local_results),
+                    "data": enriched_results,
+                    "total": len(enriched_results),
                     "query": query,
                     "search_type": search_type,
                     "source": "local_fallback"
                 }
 
     except Exception as e:
-        # Final fallback to local search if everything else fails
         try:
             local_results = search_local_data(query, search_type, limit)
+            enriched_results = enrich_local_results_with_images(local_results)
             return {
                 "success": True,
-                "data": local_results,
-                "total": len(local_results),
+                "data": enriched_results,
+                "total": len(enriched_results),
                 "query": query,
                 "search_type": search_type,
                 "source": "local_emergency_fallback"
@@ -289,6 +323,26 @@ async def test_endpoint():
         "search_type": "name"
     }
 
+@app.get("/api/test-item-structure")
+async def test_item_structure(item_id: str = Query(..., description="Item ID to test"), api_user: str = Depends(verify_api_key)):
+    """Test endpoint to see what fields are available in PlayFab items"""
+    try:
+        result = PlayFab.main([item_id])
+
+        if not result or item_id not in result:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        item = result[item_id]
+
+        return {
+            "success": True,
+            "item_id": item_id,
+            "available_fields": list(item.keys()),
+            "full_item_data": item
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get item structure: {str(e)}")
+
 @app.post("/api/search", response_model=SearchResponse)
 async def search_content(
     request: SearchRequest,
@@ -327,17 +381,17 @@ async def search_local_only(
     request: SearchRequest,
     api_user: str = Depends(verify_api_key)
 ):
-    """Search using only local data, completely bypassing PlayFab"""
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     try:
         results = search_local_data(request.query, request.search_type, request.limit or 50)
+        enriched_results = enrich_local_results_with_images(results)
 
         return SearchResponse(
             success=True,
-            data=results,
-            total=len(results),
+            data=enriched_results,
+            total=len(enriched_results),
             query=request.query,
             search_type=request.search_type
         )
@@ -351,24 +405,37 @@ async def search_local_only_get(
     limit: int = Query(50, description="Result limit"),
     api_user: str = Depends(verify_api_key)
 ):
-    """Search using only local data, completely bypassing PlayFab"""
     request = SearchRequest(query=q, search_type=type, limit=limit)
     return await search_local_only(request, api_user)
 
 def check_download_rate_limit(user_id: str) -> bool:
-    """Check if user can download (rate limiting)"""
-    current_time = time.time()
-    if user_id in download_rate_limit:
-        last_download = download_rate_limit[user_id]
-        if current_time - last_download < DOWNLOAD_RATE_LIMIT_SECONDS:
+    with download_lock:
+        current_time = time.time()
+
+        if user_id not in active_downloads:
+            active_downloads[user_id] = []
+
+        active_downloads[user_id] = [
+            timestamp for timestamp in active_downloads[user_id]
+            if current_time - timestamp < DOWNLOAD_RATE_LIMIT_SECONDS
+        ]
+
+        if len(active_downloads[user_id]) >= MAX_CONCURRENT_DOWNLOADS_PER_USER:
             return False
-    download_rate_limit[user_id] = current_time
-    return True
+
+        active_downloads[user_id].append(current_time)
+        return True
+
+def release_download_slot(user_id: str, start_time: float):
+    with download_lock:
+        if user_id in active_downloads:
+            try:
+                active_downloads[user_id].remove(start_time)
+            except ValueError:
+                pass
 
 async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
-    """Get download URL, filename, and content info from PlayFab"""
     try:
-        # Use the exact same method that works in coin.py
         result = PlayFab.main([item_id])
 
         if not result or item_id not in result:
@@ -381,23 +448,20 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
         if not contents:
             raise HTTPException(status_code=404, detail="No downloadable content found")
 
-        # Analyze content to detect types
         content_info = {
             "title": title,
             "content_types": [],
             "playfab_content_types": [],
-            "playfab_contents": contents,  # Include full PlayFab contents data
+            "playfab_contents": contents,
             "total_files": len(contents),
             "has_multiple_types": False
         }
 
-        # Extract PlayFab content types like coin.py does
         for content in contents:
             content_type = content.get("Type", "")
             if content_type:
                 content_info["playfab_content_types"].append(content_type)
 
-        # Detect content types from tags and other metadata
         tags = item.get("Tags", [])
         for tag in tags:
             tag_lower = tag.lower()
@@ -412,24 +476,19 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
             elif "mashup" in tag_lower:
                 content_info["content_types"].append("Mashup Pack")
 
-        # Also detect from PlayFab content types
         for content_type in content_info["playfab_content_types"]:
             if content_type in {"skinbinary", "personabinary"}:
                 if "Skin Pack" not in content_info["content_types"]:
                     content_info["content_types"].append("Skin Pack")
 
-        # If no types detected from tags, try to infer from content
         if not content_info["content_types"]:
-            # Default based on common patterns
             if len(contents) > 1:
                 content_info["content_types"].append("Mixed Content")
             else:
                 content_info["content_types"].append("Content Pack")
 
-        # Check if there are multiple types
         content_info["has_multiple_types"] = len(content_info["content_types"]) > 1 or len(contents) > 1
 
-        # Get the first available download URL
         download_url = None
         for content in contents:
             if "Url" in content:
@@ -439,14 +498,12 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
         if not download_url:
             raise HTTPException(status_code=404, detail="No download URL found")
 
-        # Generate filename with content type info
         content_type_str = " + ".join(content_info["content_types"]) if content_info["content_types"] else "Content"
         if content_info["has_multiple_types"]:
             filename = f"{title.replace(' ', '_').replace('/', '_')}_({content_type_str}).zip"
         else:
             filename = f"{title.replace(' ', '_').replace('/', '_')}.zip"
 
-        # Remove any invalid characters
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
 
         return download_url, filename, content_info
@@ -455,7 +512,6 @@ async def get_download_info_from_playfab(item_id: str) -> tuple[str, str, dict]:
         raise HTTPException(status_code=500, detail=f"Failed to get download info: {str(e)}")
 
 def load_keys_from_files():
-    """Load keys from keys.tsv and personal_keys.tsv files like coin.py does"""
     files_to_check = ["keys.tsv", "personal_keys.tsv"]
     loaded_lines = []
 
@@ -471,7 +527,6 @@ def load_keys_from_files():
     return loaded_lines
 
 def check_custom_id(custom_ids, loaded_lines):
-    """Check if item ID exists in keys like coin.py does"""
     if isinstance(custom_ids, str):
         custom_ids = {custom_ids}
     elif isinstance(custom_ids, list):
@@ -484,8 +539,7 @@ def check_custom_id(custom_ids, loaded_lines):
 
     return False
 
-def process_content_like_coin(item_id: str, download_url: str, title: str, content_info: dict) -> tuple[str, str]:
-    """Process content using coin.py's exact download and processing mechanism"""
+def process_content_like_coin_sync(item_id: str, download_url: str, title: str, content_info: dict) -> tuple[str, str]:
     import tempfile
     import shutil
     import os
@@ -493,7 +547,6 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
     import coin
     import dlc
 
-    # Create temporary directories like coin.py does
     temp_dir = tempfile.mkdtemp(prefix="markpe_temp_")
     download_output_folder = os.path.join(temp_dir, "download")
     final_output_folder = os.path.join(temp_dir, "output")
@@ -504,28 +557,21 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
         print(f"Processing content: {title}")
         print(f"Download URL: {download_url}")
 
-        # Load keys like coin.py does
         loaded_keys = load_keys_from_files()
         has_key_available = check_custom_id(item_id, loaded_keys)
         print(f"Key availability check for {item_id}: {has_key_available}")
 
-        # Get all content URLs from PlayFab data like coin.py does
         skin_urls = []
         other_urls = []
 
-        # Extract URLs from content info like coin.py does
         playfab_contents = content_info.get("playfab_contents", [])
         for content in playfab_contents:
             content_type = content.get("Type", "")
             if content_type in {"skinbinary", "personabinary"}:
-                # Skins always use hardcoded key, no TSV key needed
                 skin_urls.append(content["Url"])
             elif has_key_available:
-                # If we have keys for this item, process all other content
                 other_urls.append(content["Url"])
             else:
-                # Try to process anyway - some content might not be encrypted
-                # or might use default/hardcoded keys
                 other_urls.append(content["Url"])
                 print(f"No key found for {item_id}, attempting to process {content_type} anyway")
 
@@ -533,12 +579,10 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
 
         processed_files = []
 
-        # Process all URLs like coin.py does (skin_urls + other_urls)
         all_urls = other_urls + skin_urls
         for url_index, url in enumerate(all_urls):
             print(f"Processing URL {url_index + 1}/{len(all_urls)}: {url}")
 
-            # Use coin.py's download_and_process_zip function
             extracted_pack_folders = coin.download_and_process_zip(url, download_output_folder)
             if extracted_pack_folders is None:
                 print(f"Failed to download and extract from URL: {url}")
@@ -546,20 +590,16 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
 
             print(f"Extracted {len(extracted_pack_folders)} pack folders from URL")
 
-            # Determine if this URL is for skin content
             is_skin = url in skin_urls
 
             if is_skin:
-                # Process as skin pack (always process, regardless of key availability)
                 for folder_name, pack_folder in extracted_pack_folders:
                     try:
                         first_uuid = coin.data_uuid(pack_folder)
                         print(f"Processing skin pack: {folder_name}")
 
-                        # Use dlc.skin_main like coin.py does
                         dlc.skin_main(pack_folder, final_output_folder)
 
-                        # Check what files were created
                         for output_file in os.listdir(final_output_folder):
                             if output_file.endswith(('.mcpack', '.zip')) and output_file not in processed_files:
                                 processed_files.append(output_file)
@@ -569,7 +609,6 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
                         print(f"Skin processing failed for {folder_name}: {e}")
                         coin.log_error(first_uuid if 'first_uuid' in locals() else None, e)
             else:
-                # Process as DLC/resource/addon (separate into addon vs dlc folders)
                 addon_folders = []
                 dlc_folders = []
 
@@ -582,13 +621,11 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
                         dlc_folders.append(pack_folder)
                         print(f"Identified DLC/resource folder: {folder_name}")
 
-                # Process addon folders
                 if addon_folders:
                     try:
                         print(f"Processing {len(addon_folders)} addon folders")
                         dlc.main(addon_folders, ["keys.tsv", "personal_keys.tsv"], final_output_folder, is_addon=True)
 
-                        # Check what files were created
                         for output_file in os.listdir(final_output_folder):
                             if output_file.endswith(('.mcaddon', '.mcpack')) and output_file not in processed_files:
                                 processed_files.append(output_file)
@@ -596,36 +633,40 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
                     except Exception as e:
                         print(f"Addon processing failed: {e}")
 
-                # Process DLC folders
                 if dlc_folders:
                     try:
                         print(f"Processing {len(dlc_folders)} DLC folders")
                         dlc.main(dlc_folders, ["keys.tsv", "personal_keys.tsv"], final_output_folder, is_addon=False)
 
-                        # Check what files were created
                         for output_file in os.listdir(final_output_folder):
                             if output_file.endswith(('.mcpack', '.mctemplate')) and output_file not in processed_files:
                                 processed_files.append(output_file)
                                 print(f"Created DLC/resource: {output_file}")
                     except Exception as e:
                         print(f"DLC processing failed: {e}")
-                        # Continue processing other content instead of failing completely
 
         print(f"Found {len(processed_files)} processed files: {processed_files}")
 
         if not processed_files:
-            # Provide more detailed error information
             error_msg = f"No content files were successfully processed for '{title}' (ID: {item_id}). "
             if not has_key_available and not skin_urls:
-                error_msg += "This content requires decryption keys that are not available. "
-                error_msg += "Try adding the required keys to keys.tsv or personal_keys.tsv files."
+                error_msg = "This content requires decryption keys that are not available. Try adding the required keys to keys.tsv or personal_keys.tsv files."
+                # Raise a specific HTTPException for missing keys
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "missing_decryption_keys",
+                        "message": error_msg,
+                        "title": title,
+                        "item_id": item_id
+                    }
+                )
             elif not all_urls:
                 error_msg += "No downloadable content URLs were found in the PlayFab response."
             else:
                 error_msg += f"Processing failed for all {len(all_urls)} content URLs."
             raise Exception(error_msg)
 
-        # If multiple files, create a ZIP containing all of them
         if len(processed_files) > 1:
             zip_filename = f"{title.replace(' ', '_').replace('/', '_')}_content.zip"
             zip_path = os.path.join(final_output_folder, zip_filename)
@@ -636,12 +677,10 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
                     if os.path.exists(file_path):
                         zipf.write(file_path, file)
 
-            # Get file size
             file_size = os.path.getsize(zip_path)
             print(f"Created combined ZIP: {zip_filename} ({file_size} bytes)")
             return zip_filename, zip_path
         else:
-            # Single file
             filename = processed_files[0]
             file_path = os.path.join(final_output_folder, filename)
             file_size = os.path.getsize(file_path)
@@ -654,9 +693,16 @@ def process_content_like_coin(item_id: str, download_url: str, title: str, conte
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Content processing failed: {str(e)}")
     finally:
-        # Clean up the download folder but keep the final output
         if os.path.exists(download_output_folder):
             shutil.rmtree(download_output_folder, ignore_errors=True)
+
+async def process_content_like_coin(item_id: str, download_url: str, title: str, content_info: dict) -> tuple[str, str]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        thread_pool,
+        process_content_like_coin_sync,
+        item_id, download_url, title, content_info
+    )
 
 def stream_download_from_url(download_url: str):
     """Stream download from URL with proper chunking"""
@@ -665,7 +711,6 @@ def stream_download_from_url(download_url: str):
         response = requests.get(download_url, headers=headers, stream=True, timeout=60)
         response.raise_for_status()
 
-        # Stream the content in chunks
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 yield chunk
@@ -693,24 +738,20 @@ async def download_content(
     request: DownloadRequest,
     api_user: str = Depends(verify_api_key)
 ):
-    """Download content package by item ID"""
+    download_start_time = time.time()
 
-    # Check rate limiting
     if not check_download_rate_limit(api_user):
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded. Please wait {DOWNLOAD_RATE_LIMIT_SECONDS} seconds between downloads."
+            detail=f"Rate limit exceeded. Maximum {MAX_CONCURRENT_DOWNLOADS_PER_USER} concurrent downloads allowed per user."
         )
 
     try:
-        # Get download URL, filename, and content info from PlayFab
         download_url, filename, content_info = await get_download_info_from_playfab(request.item_id)
 
         if request.process_content:
-            # Process content like coin.py does
-            processed_filename, file_path = process_content_like_coin(request.item_id, download_url, content_info["title"], content_info)
+            processed_filename, file_path = await process_content_like_coin(request.item_id, download_url, content_info["title"], content_info)
 
-            # Determine media type based on file extension
             if processed_filename.endswith('.zip'):
                 media_type = "application/zip"
             elif processed_filename.endswith('.mcpack'):
@@ -722,20 +763,18 @@ async def download_content(
             else:
                 media_type = "application/zip"
 
-            # Get file size
             file_size = os.path.getsize(file_path)
 
-            # Create a streaming response that cleans up after itself
             def file_streamer():
                 try:
                     yield from stream_file_from_path(file_path)
                 finally:
-                    # Clean up the output directory after streaming
                     output_dir = os.path.dirname(file_path)
                     try:
                         shutil.rmtree(output_dir, ignore_errors=True)
                     except:
                         pass
+                    release_download_slot(api_user, download_start_time)
 
             response_headers = {
                 "Content-Disposition": f'attachment; filename="{processed_filename}"',
@@ -753,13 +792,10 @@ async def download_content(
                 headers=response_headers
             )
         else:
-            # Original behavior - stream directly from PlayFab
-            # Get content length by making a HEAD request
             headers = {"User-Agent": "libhttpclient/1.0.0.0"}
             head_response = requests.head(download_url, headers=headers, timeout=30)
             content_length = head_response.headers.get('content-length')
 
-            # Return as streaming response with real-time streaming and content info
             response_headers = {
                 "Content-Disposition": f'attachment; filename="{filename}"',
                 "X-Content-Types": ", ".join(content_info["content_types"]),
@@ -769,26 +805,32 @@ async def download_content(
                 "X-Processed": "false"
             }
 
-            # Only add Content-Length if we can determine it
             if content_length:
                 response_headers["Content-Length"] = content_length
 
+            def raw_file_streamer():
+                try:
+                    yield from stream_download_from_url(download_url)
+                finally:
+                    release_download_slot(api_user, download_start_time)
+
             return StreamingResponse(
-                stream_download_from_url(download_url),
+                raw_file_streamer(),
                 media_type="application/zip",
                 headers=response_headers
             )
 
     except HTTPException:
+        release_download_slot(api_user, download_start_time)
         raise
     except Exception as e:
+        release_download_slot(api_user, download_start_time)
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 if __name__ == "__main__":
-    # Initialize settings on startup
     load_settings()
 
     import uvicorn
     import os
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port, loop="asyncio")

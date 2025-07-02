@@ -1,3 +1,12 @@
+/* ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██████╗ ███████╗
+   ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔════╝
+   ██╔████╔██║███████║██████╔╝█████╔╝ ██████╔╝█████╗  
+   ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔═══╝ ██╔══╝  
+   ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║     ███████╗
+   ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝
+
+   This project was created for the Minecraft community, thanks to Lisa for creating this website and Bluecoin Community for giving us permissions <3 */
+
 .App {
   text-align: center;
   min-height: 100vh;
@@ -5,11 +14,9 @@
   color: white;
   position: relative;
   overflow: hidden;
-  /* Opening animation */
   animation: appFadeIn 2s ease-out;
 }
 
-/* Background animation */
 .App::before {
   content: '';
   position: fixed;
@@ -45,7 +52,6 @@
   }
 }
 
-/* Enhanced initial load state */
 .App.initial-load {
   overflow: hidden;
 }
@@ -59,7 +65,6 @@
   transform: none;
 }
 
-/* Smooth transition out of initial load */
 .App:not(.initial-load) .search-input,
 .App:not(.initial-load) .search-button,
 .App:not(.initial-load) .result-item {
@@ -80,7 +85,6 @@
 
 .title {
   margin-bottom: 40px;
-  /* Title entrance animation */
   animation: titleSlideIn 2.5s ease-out 0.5s both;
 }
 
@@ -93,13 +97,11 @@
   font-weight: bold;
   letter-spacing: 0.5px;
   white-space: pre;
-  /* Text glow effect */
   text-shadow:
     0 0 10px rgba(255, 215, 0, 0.5),
     0 0 20px rgba(255, 215, 0, 0.3),
     0 0 30px rgba(255, 215, 0, 0.1);
   animation: textGlow 3s ease-in-out infinite alternate;
-  /* Better text rendering */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -137,7 +139,6 @@
   align-items: center;
   max-width: 500px;
   width: 100%;
-  /* Search container entrance animation */
   animation: searchSlideUp 2s ease-out 1s both;
 }
 
@@ -162,7 +163,6 @@
   color: white;
   outline: none;
   transition: all 0.3s ease;
-  /* Input entrance animation */
   animation: inputSlideIn 1.5s ease-out 1.2s both;
 }
 
@@ -186,7 +186,6 @@
   cursor: pointer;
   font-weight: bold;
   transition: all 0.3s ease;
-  /* Button entrance animation */
   animation: buttonSlideIn 1.5s ease-out 1.4s both;
   position: relative;
   overflow: hidden;
@@ -277,7 +276,6 @@
   margin-top: 40px;
   max-width: 800px;
   width: 100%;
-  /* Results entrance animation */
   animation: resultsSlideIn 0.8s ease-out;
 }
 
@@ -309,25 +307,24 @@
 }
 
 .results-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 20px;
+  padding: 0 20px;
 }
 
 .result-item {
   display: flex;
-  align-items: flex-start;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px;
   background-color: #2a2a2a;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 1px solid #333;
   text-align: left;
-  justify-content: space-between;
-  min-height: 80px; /* Ensure consistent height */
-  /* Result item entrance animation */
   animation: resultItemSlideIn 0.6s ease-out both;
   transition: all 0.3s ease;
+  height: fit-content;
 }
 
 .result-item:hover {
@@ -336,7 +333,6 @@
   border-color: #ffd700;
 }
 
-/* Staggered animation for result items */
 .result-item:nth-child(1) { animation-delay: 0.1s; }
 .result-item:nth-child(2) { animation-delay: 0.2s; }
 .result-item:nth-child(3) { animation-delay: 0.3s; }
@@ -355,23 +351,51 @@
   }
 }
 
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
 .result-number {
   color: #ffd700;
   font-weight: bold;
+  font-size: 18px;
   min-width: 30px;
-  align-self: flex-start; /* Align to top */
-  margin-top: 2px; /* Small offset for better alignment */
+}
+
+.result-thumbnail {
+  width: 100%;
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #1a1a1a;
+  border: 1px solid #333;
+}
+
+.result-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.result-thumbnail:hover img {
+  transform: scale(1.02);
 }
 
 .result-content {
-  flex: 1;
-  min-width: 0; /* Allow content to shrink if needed */
+  width: 100%;
+  text-align: center;
 }
 
 .result-title {
   color: white;
   font-weight: bold;
-  margin-bottom: 4px;
+  font-size: 18px;
+  margin-bottom: 8px;
+  line-height: 1.3;
 }
 
 .result-creator {
@@ -425,7 +449,6 @@
   border-top: 2px solid #ffd700;
   padding: 16px 20px;
   z-index: 1000;
-  /* Footer entrance animation */
   animation: footerSlideUp 2s ease-out 1.8s both;
 }
 
@@ -494,9 +517,8 @@
 .result-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-left: 16px;
-  flex-shrink: 0; /* Prevent shrinking */
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .download-button {
@@ -513,9 +535,9 @@
   font-weight: 500;
   transition: all 0.3s ease;
   min-width: 130px;
-  height: 40px; /* Fixed height for consistency */
+  height: 40px;
   justify-content: center;
-  white-space: nowrap; /* Prevent text wrapping */
+  white-space: nowrap;
 }
 
 .download-button:hover:not(:disabled) {
@@ -573,13 +595,11 @@
   font-size: 12px;
 }
 
-/* Downloads Icon */
 .downloads-icon-container {
   position: fixed;
   top: 20px;
   right: 20px;
   z-index: 1000;
-  /* Downloads icon entrance animation */
   animation: iconSlideIn 1.5s ease-out 2s both;
 }
 
@@ -630,7 +650,6 @@
   font-weight: bold;
 }
 
-/* Downloads Panel */
 .downloads-panel {
   position: fixed;
   top: 0;
@@ -689,7 +708,6 @@
   margin-top: 50px;
 }
 
-/* Download Item */
 .download-item {
   background: #333;
   border-radius: 8px;
@@ -810,7 +828,6 @@
   color: #f44336;
 }
 
-/* Notifications */
 .notifications-container {
   position: fixed;
   top: 20px;
@@ -871,7 +888,6 @@
   }
 }
 
-/* Mobile Responsive Updates */
 @media (max-width: 768px) {
   .title pre {
     font-size: 10px;
@@ -880,15 +896,26 @@
   }
 }
 
-/* Tablet responsive */
 @media (max-width: 1024px) and (min-width: 769px) {
   .title pre {
     font-size: 12px;
     letter-spacing: 0.3px;
   }
+
+  .results-list {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+
+  .result-thumbnail {
+    height: 180px;
+  }
+
+  .result-title {
+    font-size: 16px;
+  }
 }
 
-/* Large screens */
 @media (min-width: 1200px) {
   .title pre {
     font-size: 16px;
@@ -904,23 +931,70 @@
     width: 100%;
   }
 
+  .results-list {
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 24px;
+  }
+
+  .result-thumbnail {
+    height: 220px;
+  }
+
+  .result-title {
+    font-size: 20px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .results-list {
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 30px;
+  }
+
+  .result-thumbnail {
+    height: 250px;
+  }
+
+  .result-title {
+    font-size: 22px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .results-list {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 0 16px;
+  }
+
   .result-item {
+    padding: 16px;
+  }
+
+  .result-thumbnail {
+    height: 180px;
+  }
+
+  .result-title {
+    font-size: 16px;
+  }
+
+  .result-header {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 15px;
-    min-height: auto; /* Remove fixed height on mobile */
+    gap: 12px;
+    align-items: center;
   }
 
   .result-actions {
     width: 100%;
     justify-content: center;
-    margin-left: 0; /* Remove left margin on mobile */
+    margin-left: 0;
   }
 
   .download-button {
     width: 100%;
-    max-width: 300px; /* Limit max width on mobile */
-    min-width: auto; /* Allow smaller width on mobile */
+    max-width: 300px;
+    min-width: auto;
   }
 
   .downloads-panel {
@@ -946,5 +1020,25 @@
 
   .notification {
     min-width: auto;
+  }
+}
+
+@media (min-width: 1400px) {
+  .downloads-panel {
+    width: 500px;
+    right: -500px;
+    top: 10%;
+    height: 80vh;
+    border-radius: 8px 0 0 8px;
+    box-shadow: -5px 0 15px rgba(0, 0, 0, 0.3);
+  }
+
+  .downloads-panel.open {
+    right: 20px;
+  }
+
+  .downloads-icon-container {
+    top: 10%;
+    right: 30px;
   }
 }

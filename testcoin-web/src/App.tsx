@@ -1,3 +1,12 @@
+// ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗██████╗ ███████╗
+// ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔════╝
+// ██╔████╔██║███████║██████╔╝█████╔╝ ██████╔╝█████╗  
+// ██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔═══╝ ██╔══╝  
+// ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║     ███████╗
+// ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝
+//
+// This project was created for the Minecraft community, thanks to Lisa for creating this website and Bluecoin Community for giving us permissions <3
+
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
@@ -8,6 +17,12 @@ interface SearchResult {
   ContentType: string[];
   Tags: string[];
   source?: string;
+  Images?: Array<{
+    Id: string;
+    Tag: string;
+    Type: string;
+    Url: string;
+  }>;
 }
 
 interface DownloadItem {
@@ -19,10 +34,10 @@ interface DownloadItem {
   downloadedSize: number;
   speed: number;
   startTime: number;
-  serverStatus?: string; // For showing server-side download status
-  contentTypes?: string; // Content types (e.g., "Skin Pack + Resource Pack")
-  hasMultipleTypes?: boolean; // Whether this contains multiple content types
-  totalFiles?: string; // Number of files in the package
+  serverStatus?: string;
+  contentTypes?: string;
+  hasMultipleTypes?: boolean;
+  totalFiles?: string;
 }
 
 interface Notification {
@@ -31,7 +46,7 @@ interface Notification {
   type: 'success' | 'error' | 'info';
 }
 
-// API Configuration
+// API config
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 function App() {
@@ -45,8 +60,28 @@ function App() {
   const [isDownloadPanelOpen, setIsDownloadPanelOpen] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+  const getThumbnailUrl = (images?: Array<{Id: string; Tag: string; Type: string; Url: string}>) => {
+    if (!images || images.length === 0) return null;
+
+    const thumbnail = images.find(img => img.Tag === 'Thumbnail');
+    return thumbnail?.Url || null;
+  };
+
   useEffect(() => {
-    console.log(`
+    const checkApiStatus = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/health`, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer markpe_api_key_2024'
+          },
+          signal: AbortSignal.timeout(5000)
+        });
+
+        const status = response.ok ? 'Online and Detected' : 'Detected but Error';
+        const environment = API_BASE_URL.includes('localhost') ? 'Local' : 'Production';
+
+        console.log(`
 ███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
 ████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
 ██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
@@ -54,14 +89,31 @@ function App() {
 ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 
-MarkAPI v1.1 - Online and Detected
+MarkAPI v1.2 - ${status} (${environment})
 Minecraft Marketplace Content Platform
 `);
+      } catch (error) {
+        const environment = API_BASE_URL.includes('localhost') ? 'Local' : 'Production';
 
-    // Handle initial load animation timing
+        console.log(`
+███╗   ███╗ █████╗ ██████╗ ██╗  ██╗ █████╗ ██████╗ ██╗
+████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██║
+██╔████╔██║███████║██████╔╝█████╔╝ ███████║██████╔╝██║
+██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══██║██╔═══╝ ██║
+██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
+╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+
+MarkAPI v1.2 - Not Detected (${environment})
+Minecraft Marketplace Content Platform
+`);
+      }
+    };
+
+    checkApiStatus();
+
     const timer = setTimeout(() => {
       setIsInitialLoad(false);
-    }, 3000); // Animation completes after 3 seconds
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, []);
@@ -75,7 +127,6 @@ Minecraft Marketplace Content Platform
     setResults([]);
 
     try {
-      // Use Testcoin FastAPI server endpoint
       const apiUrl = `${API_BASE_URL}/api/search`;
 
       const response = await fetch(apiUrl, {
@@ -101,7 +152,6 @@ Minecraft Marketplace Content Platform
         const searchResults = data.data || [];
         setResults(searchResults);
 
-        // Show no results error if empty
         if (searchResults.length === 0) {
           setNoResultsError(`No results found for "${searchQuery}". Please try a different search term.`);
           setTimeout(() => {
@@ -110,7 +160,6 @@ Minecraft Marketplace Content Platform
         }
 
         if (data.source && data.source.includes('local')) {
-          // Show a subtle indicator that we're using local data
           console.log('Using local data source for faster results');
         }
       } else {
@@ -130,13 +179,11 @@ Minecraft Marketplace Content Platform
     }
   };
 
-  // Helper functions for downloads and notifications
   const addNotification = (message: string, type: 'success' | 'error' | 'info') => {
     const id = Date.now().toString();
     const notification: Notification = { id, message, type };
     setNotifications(prev => [...prev, notification]);
 
-    // Auto remove after 5 seconds
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 5000);
@@ -155,12 +202,11 @@ Minecraft Marketplace Content Platform
   };
 
   const handleDownload = async (itemId: string, title: string) => {
-    // Add notification
     addNotification(`Starting download: ${title}`, 'info');
 
-    // Create download item with pending status
+    const uniqueDownloadId = `${itemId}_${Date.now()}`;
     const downloadItem: DownloadItem = {
-      id: itemId,
+      id: uniqueDownloadId,
       title,
       status: 'pending',
       progress: 0,
@@ -171,17 +217,16 @@ Minecraft Marketplace Content Platform
       serverStatus: 'Server fetching content...'
     };
 
-    setDownloads(prev => [...prev.filter(d => d.id !== itemId), downloadItem]);
+    setDownloads(prev => [...prev, downloadItem]);
 
-    // Set a timeout to update server status if it takes too long
     const serverStatusTimeout = setTimeout(() => {
       setDownloads(prev => prev.map(d =>
-        d.id === itemId && d.status === 'pending' ? {
+        d.id === uniqueDownloadId && d.status === 'pending' ? {
           ...d,
           serverStatus: 'Server processing... This may take a moment.'
         } : d
       ));
-    }, 3000); // Show after 3 seconds
+    }, 3000);
 
     try {
       const apiUrl = `${API_BASE_URL}/api/download`;
@@ -194,40 +239,53 @@ Minecraft Marketplace Content Platform
         },
         body: JSON.stringify({
           item_id: itemId,
-          process_content: true  // Enable processing like coin.py
+          process_content: true
         })
       });
 
       if (!response.ok) {
-        throw new Error(`Download failed: ${response.status}`);
+        let errorMessage = `Download failed: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.detail && typeof errorData.detail === 'object') {
+            if (errorData.detail.error === 'missing_decryption_keys') {
+              errorMessage = `🔐 Missing Decryption Keys: ${errorData.detail.message}`;
+              addNotification(errorMessage, 'error');
+              setDownloads(prev => prev.filter(d => d.id !== uniqueDownloadId));
+              return;
+            } else {
+              errorMessage = errorData.detail.message || errorData.detail;
+            }
+          } else if (errorData.detail) {
+            errorMessage = errorData.detail;
+          }
+        } catch (parseError) {
+        }
+        throw new Error(errorMessage);
       }
 
       const contentLength = response.headers.get('content-length');
       const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
 
-      // Get content type information from headers
       const contentTypes = response.headers.get('x-content-types') || 'Content Pack';
       const hasMultipleTypes = response.headers.get('x-has-multiple-types') === 'true';
       const totalFiles = response.headers.get('x-total-files') || '1';
       const isProcessed = response.headers.get('x-processed') === 'true';
 
-      // Clear the server status timeout since we got a response
       clearTimeout(serverStatusTimeout);
 
-      // Update download item with total size, content info, and change status to downloading
       setDownloads(prev => prev.map(d =>
-        d.id === itemId ? {
+        d.id === uniqueDownloadId ? {
           ...d,
           totalSize,
           contentTypes: isProcessed ? `${contentTypes} (Processed)` : contentTypes,
           hasMultipleTypes,
           totalFiles,
           status: 'downloading',
-          serverStatus: undefined // Clear server status when actual download starts
+          serverStatus: undefined
         } : d
       ));
 
-      // Get the filename from response headers or use a default
       const contentDisposition = response.headers.get('content-disposition');
       let filename = `${title.replace(/[^a-z0-9]/gi, '_')}.zip`;
 
@@ -238,7 +296,6 @@ Minecraft Marketplace Content Platform
         }
       }
 
-      // Read the response with progress tracking
       const reader = response.body?.getReader();
       const chunks: Uint8Array[] = [];
       let downloadedSize = 0;
@@ -266,22 +323,20 @@ Minecraft Marketplace Content Platform
         downloadedSize += value.length;
 
         const currentTime = Date.now();
-        const elapsedTime = (currentTime - startTime) / 1000; // seconds
+        const elapsedTime = (currentTime - startTime) / 1000;
         const speed = elapsedTime > 0 ? downloadedSize / elapsedTime : 0;
         const progress = totalSize > 0 ? (downloadedSize / totalSize) * 100 : 0;
 
-        // Update download progress - capture values to avoid closure issues
         const currentDownloadedSize = downloadedSize;
         const currentProgress = Math.min(progress, 100);
         const currentSpeed = speed;
 
-        // Log progress every 1MB or so
         if (downloadedSize % (1024 * 1024) < value.length) {
           console.log(`Download progress: ${formatBytes(downloadedSize)} at ${formatSpeed(speed)}`);
         }
 
         setDownloads(prev => prev.map(d =>
-          d.id === itemId ? {
+          d.id === uniqueDownloadId ? {
             ...d,
             downloadedSize: currentDownloadedSize,
             progress: currentProgress,
@@ -290,7 +345,6 @@ Minecraft Marketplace Content Platform
         ));
       }
 
-      // Create blob and download
       console.log(`Creating blob from ${chunks.length} chunks, total size: ${downloadedSize} bytes`);
       const blob = new Blob(chunks, { type: 'application/zip' });
       console.log(`Blob created with size: ${blob.size} bytes`);
@@ -299,20 +353,16 @@ Minecraft Marketplace Content Platform
         throw new Error('Downloaded file is empty - no data received from server');
       }
 
-      // Check if browser supports downloads
       if (!window.URL || !window.URL.createObjectURL) {
         throw new Error('Browser does not support file downloads');
       }
 
-      // Log security context info
       console.log(`Download context - HTTPS: ${window.location.protocol === 'https:'}, Secure Context: ${window.isSecureContext}`);
 
-      // Warn if not in secure context (some browsers may block downloads)
       if (!window.isSecureContext && window.location.hostname !== 'localhost') {
         console.warn('Not in secure context - downloads may be blocked by browser');
       }
 
-      // Try multiple download methods for better compatibility
       try {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -324,10 +374,8 @@ Minecraft Marketplace Content Platform
         console.log(`Triggering download for file: ${filename}`);
         a.click();
 
-        // Notify user that download is being saved
         addNotification(`Saving ${filename} to device...`, 'info');
 
-        // Clean up after a short delay
         setTimeout(() => {
           window.URL.revokeObjectURL(url);
           if (document.body.contains(a)) {
@@ -338,7 +386,6 @@ Minecraft Marketplace Content Platform
       } catch (downloadError) {
         console.error('Primary download method failed:', downloadError);
 
-        // Fallback: try using a different approach
         try {
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
@@ -346,7 +393,6 @@ Minecraft Marketplace Content Platform
           link.setAttribute('download', filename);
           link.style.display = 'none';
 
-          // Try using mouse event
           const event = new MouseEvent('click', {
             view: window,
             bubbles: true,
@@ -369,41 +415,41 @@ Minecraft Marketplace Content Platform
         }
       }
 
-      // Mark as completed
       setDownloads(prev => prev.map(d =>
-        d.id === itemId ? { ...d, status: 'completed', progress: 100 } : d
+        d.id === uniqueDownloadId ? { ...d, status: 'completed', progress: 100 } : d
       ));
 
       addNotification(`Download completed: ${title}`, 'success');
 
-      // Remove from downloads after 10 seconds
       setTimeout(() => {
-        setDownloads(prev => prev.filter(d => d.id !== itemId));
+        setDownloads(prev => prev.filter(d => d.id !== uniqueDownloadId));
       }, 10000);
 
     } catch (err) {
       console.error('Download error:', err);
 
-      // Clear the server status timeout on error
       clearTimeout(serverStatusTimeout);
 
-      // Mark as error
       setDownloads(prev => prev.map(d =>
-        d.id === itemId ? { ...d, status: 'error' } : d
+        d.id === uniqueDownloadId ? { ...d, status: 'error' } : d
       ));
 
-      addNotification(`Download failed: ${title}`, 'error');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
 
-      // Remove from downloads after 5 seconds
+      if (errorMessage.includes('🔐 Missing Decryption Keys:')) {
+      } else {
+        addNotification(`Download failed: ${errorMessage}`, 'error');
+      }
+
       setTimeout(() => {
-        setDownloads(prev => prev.filter(d => d.id !== itemId));
+        setDownloads(prev => prev.filter(d => d.id !== uniqueDownloadId));
       }, 5000);
     }
   };
 
   return (
     <div className={`App ${isInitialLoad ? 'initial-load' : ''}`}>
-      {/* Notifications */}
+      {/* notifications */}
       <div className="notifications-container">
         {notifications.map((notification) => (
           <div key={notification.id} className={`notification notification-${notification.type}`}>
@@ -414,7 +460,7 @@ Minecraft Marketplace Content Platform
         ))}
       </div>
 
-      {/* Downloads Panel */}
+      {/* downloads panel */}
       <div className={`downloads-panel ${isDownloadPanelOpen ? 'open' : ''}`}>
         <div className="downloads-header">
           <h3>Downloads</h3>
@@ -490,7 +536,7 @@ Minecraft Marketplace Content Platform
       </div>
 
       <header className="App-header">
-        {/* Downloads Icon */}
+        {/* downloads icon */}
         <div className="downloads-icon-container">
           <button
             className="downloads-icon"
@@ -514,7 +560,7 @@ Minecraft Marketplace Content Platform
 ██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║  ██║██║     ██║
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 
-                    MarkPE v1.1
+                    MarkPE v1.2
           `}</pre>
         </div>
         <div className="search-container">
@@ -545,16 +591,47 @@ Minecraft Marketplace Content Platform
             <h3>Search Results ({results.length})</h3>
             <div className="results-list">
               {results.map((result, index) => {
-                const downloadItem = downloads.find(d => d.id === result.Id);
+                const downloadItem = downloads.find(d => d.id.startsWith(result.Id + '_'));
                 const isPending = downloadItem?.status === 'pending';
                 const isDownloading = downloadItem?.status === 'downloading';
                 const isCompleted = downloadItem?.status === 'completed';
                 const isError = downloadItem?.status === 'error';
                 const isActive = isPending || isDownloading;
 
+                const thumbnailUrl = getThumbnailUrl(result.Images);
+
                 return (
                   <div key={result.Id} className="result-item">
-                    <div className="result-number">{index + 1}</div>
+                    <div className="result-header">
+                      <div className="result-number">{index + 1}</div>
+                      <div className="result-actions">
+                        <button
+                          className={`download-button ${isPending ? 'pending' : isDownloading ? 'downloading' : isCompleted ? 'completed' : isError ? 'error' : 'idle'}`}
+                          onClick={() => handleDownload(result.Id,
+                            typeof result.Title === 'string' ? result.Title :
+                            result.Title?.['en-US'] || 'Unknown Title')}
+                          disabled={isActive}
+                        >
+                          {isPending ? 'Pending...' :
+                           isDownloading ? 'Downloading...' :
+                           isCompleted ? 'Downloaded' :
+                           isError ? 'Error' : 'Download'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {thumbnailUrl && (
+                      <div className="result-thumbnail">
+                        <img
+                          src={thumbnailUrl}
+                          alt={`${typeof result.Title === 'string' ? result.Title : result.Title?.['en-US'] || 'Content'} thumbnail`}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+
                     <div className="result-content">
                       <div className="result-title">
                         {typeof result.Title === 'string' ? result.Title :
@@ -572,26 +649,6 @@ Minecraft Marketplace Content Platform
                           {result.Tags.length > 5 && <span className="tag">+{result.Tags.length - 5} more</span>}
                         </div>
                       )}
-                    </div>
-                    <div className="result-actions">
-                      <button
-                        className={`download-button ${isPending ? 'pending' : isDownloading ? 'downloading' : isCompleted ? 'completed' : isError ? 'error' : 'idle'}`}
-                        onClick={() => handleDownload(result.Id,
-                          typeof result.Title === 'string' ? result.Title :
-                          result.Title?.['en-US'] || 'Unknown Title')}
-                        disabled={isActive}
-                      >
-                        {(isPending || isDownloading) && <span className="spinner"></span>}
-                        {isCompleted && '✓'}
-                        {isError && '✗'}
-                        {!isPending && !isDownloading && !isCompleted && !isError && '⬇'}
-                        <span className="download-text">
-                          {isPending ? 'Preparing...' :
-                           isDownloading ? 'Downloading...' :
-                           isCompleted ? 'Downloaded' :
-                           isError ? 'Failed' : 'Download'}
-                        </span>
-                      </button>
                     </div>
                   </div>
                 );

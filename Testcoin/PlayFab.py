@@ -421,7 +421,7 @@ def main(custom_id):
     # Split the custom_ids list into chunks
     for i in range(0, len(custom_ids), MAX_SEARCH):
         chunk = custom_ids[i:i + MAX_SEARCH]
-        search_result = Search("", "creationDate DESC", "contents", MAX_SEARCH, 0, chunk)
+        search_result = Search("", "creationDate DESC", "contents,images", MAX_SEARCH, 0, chunk)
         search_results = search_result["Items"]
 
         if search_results:
